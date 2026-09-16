@@ -60,7 +60,22 @@ adb shell su -c 'sh /data/adb/modules/adbfix/service.sh'
 
 ## Design notes
 
-Two non-obvious things bit during development; both are worth knowing if you fork this.
+Three non-obvious things bit during development; all are worth knowing if you fork this.
+
+**A pidfile alone does not give you single-instance.** PIDs are reused, and after a
+reboot the pid recorded at the *previous* boot almost certainly belongs to some
+unrelated process. A bare `kill -0 "$pid"` then succeeds, the fresh watchdog concludes
+it is already running, exits — and you have **no watchdog at all, silently**. It is
+invisible from the outside because `persist.adb.tcp.port` still makes `adbd` bind the
+port at boot, so everything looks healthy until the first time you actually need
+recovery. Check the process *identity*, not just its existence:
+
+```sh
+same_watchdog() {
+    kill -0 "$1" 2>/dev/null || return 1
+    tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null | grep -q adbfix-watchdog
+}
+```
 
 **Do not use `exec 9>file` + `flock -n 9` for the single-instance lock.** On Android,
 `/system/bin/sh` is mksh, which silently ignores high-numbered file-descriptor

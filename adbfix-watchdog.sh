@@ -34,17 +34,26 @@ recover_adbd() {
 }
 
 # --- single instance ---------------------------------------------------------
+# A pidfile alone is NOT enough. PIDs are reused: after a reboot the pid recorded
+# at the previous boot almost certainly belongs to some unrelated process, so a
+# bare `kill -0` succeeds and the fresh watchdog concludes it is already running
+# and exits -- leaving no watchdog at all, silently. Verify the identity of the
+# process too, by checking that its cmdline is this script.
+same_watchdog() {
+  _pid="$1"
+  [ -n "$_pid" ] || return 1
+  case "$_pid" in *[!0-9]*) return 1 ;; esac
+  kill -0 "$_pid" 2>/dev/null || return 1
+  tr '\0' ' ' < "/proc/$_pid/cmdline" 2>/dev/null | /system/bin/grep -q adbfix-watchdog
+}
+
 if [ -f "$PIDFILE" ]; then
   old=$(cat "$PIDFILE" 2>/dev/null)
-  case "$old" in
-    ''|*[!0-9]*) ;;
-    *)
-      if kill -0 "$old" 2>/dev/null; then
-        log_note "watchdog already running (pid $old), standing down"
-        exit 0
-      fi
-      ;;
-  esac
+  if same_watchdog "$old"; then
+    log_note "watchdog already running (pid $old), standing down"
+    exit 0
+  fi
+  log_note "stale pidfile (pid ${old:-empty} is not this watchdog), taking over"
 fi
 echo $$ > "$PIDFILE"
 log_note "watchdog started (pid $$, interval ${INTERVAL}s)"
